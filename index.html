@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Hall Ticket OCR Scanner</title>
+    <style>
+        body { font-family: Arial; text-align: center; margin-top: 30px; }
+        video { border: 2px solid #333; width: 400px; height: 300px; }
+        canvas { display: none; }
+        #result { margin-top: 20px; font-size: 1.2em; color: green; }
+    </style>
+</head>
+<body>
+    <h1>Hall Ticket OCR Scanner</h1>
+    <video id="video" autoplay></video>
+    <p id="ocrText">OCR Text: None</p>
+    <p id="result">Result: None</p>
+    <div style="margin-top:20px;">
+      <input type="text" id="manualInput" placeholder="Enter Hall Ticket Number" style="padding:8px;font-size:16px;width:250px;">
+      <button onclick="manualSearch()">Search</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
+    <script>
+        const video = document.getElementById('video');
+        const result = document.getElementById('result');
+        const ocrText = document.getElementById('ocrText');
+
+        // Access webcam
+        navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => video.srcObject = stream)
+        .catch(err => alert("Webcam error: " + err));
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Pause/resume scanning logic
+        let lastDetectedTicket = null;
+        let scanningPaused = false;
+
+        async function scanFrame() {
+            if (scanningPaused) return;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const { data: { text } } = await Tesseract.recognize(canvas, 'eng', { logger: m => {} });
+            // Show raw OCR text for debugging
+            let rawText = text.replace(/\s+/g, ' ');
+            // Extract hall ticket number pattern PGAIAI240001
+            const match = text.match(/PGAIAI\d{6}/);
+            let displayText = "None";
+            if(match){
+                const hallTicket = match[0];
+                displayText = hallTicket;
+                if (hallTicket !== lastDetectedTicket) {
+                  lastDetectedTicket = hallTicket;
+                  getStudentInfo(hallTicket);
+                  scanningPaused = true;
+                }
+            }
+            ocrText.innerHTML = `<b>OCR Text:</b> ${rawText}<br><b>Detected Hall Ticket:</b> ${displayText}`;
+            console.log("OCR Text:", rawText, "Detected Hall Ticket:", displayText); // Debug line
+
+            requestAnimationFrame(scanFrame);
+        }
+
+        // Resume scanning when a new hall ticket is visible
+        function resumeScanningIfNewTicket(text) {
+          const match = text.match(/PGAIAI\d{6}/);
+          if (match) {
+            const hallTicket = match[0];
+            if (hallTicket !== lastDetectedTicket) {
+              scanningPaused = false;
+              lastDetectedTicket = null;
+            }
+          }
+        }
+
+        video.addEventListener('play', () => scanFrame());
+
+        // Also check for new ticket every second
+        setInterval(() => {
+          if (scanningPaused) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            Tesseract.recognize(canvas, 'eng', { logger: m => {} })
+              .then(({ data: { text } }) => {
+                resumeScanningIfNewTicket(text);
+              });
+          }
+        }, 1000);
+
+        // Fetch student info from backend
+        async function getStudentInfo(hallTicket){
+            try{
+                const res = await fetch(`http://localhost:3000/student/${hallTicket}`);
+                const data = await res.json();
+        if(data.success){
+          const s = data.student;
+          result.innerText = `Name: ${s.name}\nBlock: ${s.block}\nRoom: ${s.room}`;
+        } else {
+          result.innerText = "Student not found!";
+        }
+            } catch(err){
+                result.innerText = "Error contacting backend";
+            }
+        }
+
+        // Manual hall ticket search
+        function manualSearch() {
+          const input = document.getElementById('manualInput').value.trim().toUpperCase();
+          if (!input) {
+            result.innerText = "Please enter a hall ticket number.";
+            return;
+          }
+          fetch(`http://localhost:3000/student/${input}`)
+            .then(res => res.json())
+            .then(data => {
+              if(data.success){
+                const s = data.student;
+                result.innerText = `Name: ${s.name}\nBlock: ${s.block}\nRoom: ${s.room}`;
+              } else {
+                result.innerText = "Student not found!";
+              }
+            })
+            .catch(() => {
+              result.innerText = "Error contacting backend";
+            });
+        }
+    </script>
+</body>
+</html>

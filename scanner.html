@@ -1,0 +1,111 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Student Hall Ticket Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; padding: 30px; background: #f7f7f7; }
+    .container { background: #fff; border-radius: 10px; box-shadow: 0 2px 8px #ccc; display: inline-block; padding: 30px 40px; }
+    video { border: 2px solid #333; border-radius: 8px; width: 400px; height: 300px; margin-bottom: 10px; }
+    button { margin: 10px 5px; padding: 10px 24px; font-size: 16px; border-radius: 6px; border: none; background: #0078d7; color: #fff; cursor: pointer; }
+    button:hover { background: #005fa3; }
+    input[type="text"] { padding: 10px; font-size: 16px; width: 260px; border-radius: 6px; border: 1px solid #ccc; margin-right: 8px; }
+    #result { margin-top: 25px; font-size: 18px; color: #222; background: #e9ffe9; border-radius: 8px; padding: 15px; min-height: 40px; }
+    .title { font-size: 2em; margin-bottom: 20px; color: #0078d7; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="title">📷 Student Hall Ticket Scanner</div>
+    <video id="video" autoplay></video><br>
+    <button onclick="scanText()">Scan Hall Ticket</button>
+    <div style="margin-top:20px;">
+      <input type="text" id="manualInput" placeholder="Enter Hall Ticket Number">
+      <button onclick="manualSearch()">Search</button>
+    </div>
+    <div id="result">Result will appear here...</div>
+  </div>
+
+  <script>
+    const video = document.getElementById('video');
+    const resultDiv = document.getElementById('result');
+    let studentsData = [];
+
+    // Load student database
+    fetch('students.json')
+      .then(response => response.json())
+      .then(data => studentsData = data);
+
+    // Start webcam
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => { video.srcObject = stream; });
+
+    function scanText() {
+      resultDiv.innerHTML = "Scanning...";
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+
+      Tesseract.recognize(canvas, 'eng')
+        .then(({ data: { text } }) => {
+          const cleaned = text.replace(/\s/g, '').toUpperCase();
+          resultDiv.innerHTML = `<b>Scanned Text:</b> ${cleaned}<br>`;
+
+          // Show possible matches for debugging
+          let possibleMatches = studentsData.filter(s => {
+            const ticket = s.hall_ticket.replace(/\s/g, '').toUpperCase();
+            let mismatches = 0;
+            for (let i = 0; i < ticket.length; i++) {
+              if (cleaned[i] !== ticket[i]) mismatches++;
+            }
+            return cleaned.includes(ticket) || mismatches <= 5;
+          });
+
+          if (possibleMatches.length > 0) {
+            const student = possibleMatches[0];
+            resultDiv.innerHTML += `
+              <span style='color:green;'>✅ Found Student (Best Match)</span><br>
+              <b>Name:</b> ${student.name}<br>
+              <b>Hall Ticket:</b> ${student.hall_ticket}<br>
+              <b>Block:</b> ${student.block}<br>
+            `;
+            if (possibleMatches.length > 1) {
+              resultDiv.innerHTML += `<br><b>Other possible matches:</b><br>`;
+              possibleMatches.slice(1).forEach(s => {
+                resultDiv.innerHTML += `${s.hall_ticket} - ${s.name}<br>`;
+              });
+            }
+          } else {
+            resultDiv.innerHTML += "<span style='color:red;'>❌ No match found. Try again or enter manually below.</span>";
+          }
+        })
+        .catch(err => {
+          resultDiv.innerHTML = `<span style='color:red;'>Error scanning: ${err.message}</span>`;
+        });
+    }
+
+    function manualSearch() {
+      const input = document.getElementById('manualInput').value.trim().toUpperCase();
+      if (!input) {
+        resultDiv.innerHTML = "Please enter a hall ticket number.";
+        return;
+      }
+      const student = studentsData.find(s => s.hall_ticket.replace(/\s/g, '').toUpperCase() === input);
+      if (student) {
+        resultDiv.innerHTML = `
+          <span style='color:green;'>✅ Found Student</span><br>
+          <b>Name:</b> ${student.name}<br>
+          <b>Hall Ticket:</b> ${student.hall_ticket}<br>
+          <b>Block:</b> ${student.block}<br>
+        `;
+      } else {
+        resultDiv.innerHTML = "<span style='color:red;'>❌ No match found for entered hall ticket.";
+      }
+    }
+  </script>
+</body>
+</html>
